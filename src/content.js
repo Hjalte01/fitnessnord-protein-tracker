@@ -328,7 +328,7 @@ function upsertBadge(product, text, state = "ready") {
 }
 
 function formatRatio(ratio) {
-  return ratio.toFixed(2).replace(".", ",");
+  return `${ratio.toFixed(2).replace(".", ",")} p/DKK`;
 }
 
 function getThreshold() {
@@ -398,7 +398,7 @@ async function annotateProduct(product) {
 
     const ratio = proteinGrams / price;
     setProductResult(product, { price, proteinGrams, ratio, status: "ready" });
-    upsertBadge(product, `(${formatRatio(ratio)}p/DKK)`);
+    upsertBadge(product, `(${formatRatio(ratio)})`);
   } catch (error) {
     console.debug("[FitnessNord Protein Tracker]", error);
     setProductResult(product, { price, proteinGrams: null, ratio: null, status: "unknown" });
@@ -669,7 +669,7 @@ function renderPanel() {
   const best = ranked[0] || null;
 
   panel.querySelector("[data-role='summary']").textContent = best
-    ? `Bedst: ${formatRatio(best.ratio)}p/DKK`
+    ? `Bedst: ${formatRatio(best.ratio)}`
     : "Ingen kendte ratios endnu";
 
   panel.querySelector("[data-role='counts']").textContent =
@@ -703,7 +703,7 @@ function renderPanel() {
 
     const ratio = document.createElement("span");
     ratio.className = "fn-protein-result-ratio";
-    ratio.textContent = `${formatRatio(result.ratio)}p/DKK`;
+    ratio.textContent = formatRatio(result.ratio);
 
     button.append(rank, title, ratio);
     list.append(button);

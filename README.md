@@ -10,7 +10,7 @@ https://www.fitnessnord.com/tilbud*
 
 ## Features
 
-- Adds a protein-value badge beside product prices, for example `(2,58p/DKK)`.
+- Adds a protein-value badge beside product prices, for example `(2,58 p/DKK)`.
 - Fetches each linked product page and reads the nutrition table when available.
 - Scales table values correctly for packages like `1 x 60 g`, `12 x 35 g`, `3 x 330 g`, and `2 kg`.
 - Falls back to explicit product text like `25 g protein` or `35% protein` when table data is missing.
