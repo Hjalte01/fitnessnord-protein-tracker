@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "FitnessNord Protein Tracker",
+  "version": "0.1.0",
+  "description": "Shows grams of protein per DKK on FitnessNord offer cards.",
+  "content_scripts": [
+    {
+      "matches": ["https://www.fitnessnord.com/tilbud*"],
+      "js": ["src/content.js"],
+      "css": ["src/styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["https://www.fitnessnord.com/*"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "fitnessnord-protein-tracker@example.local",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  }
+}

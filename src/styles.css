@@ -1,0 +1,199 @@
+.fn-protein-ratio {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.25rem;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid #147a4f;
+  border-radius: 4px;
+  color: #0f5f3e;
+  background: #eaf8f1;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.fn-protein-ratio[data-state="loading"] {
+  border-color: #7a6a14;
+  color: #5f500f;
+  background: #fbf6d8;
+}
+
+.fn-protein-ratio[data-state="unknown"] {
+  border-color: #8a8a8a;
+  color: #555;
+  background: #f2f2f2;
+}
+
+.fn-protein-panel {
+  position: sticky;
+  top: var(--fn-protein-sticky-top, 8px);
+  z-index: 9999;
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  padding: 8px 18px 0;
+  pointer-events: none;
+  color: #162018;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+}
+
+.fn-protein-toggle,
+.fn-protein-controls button {
+  border: 0;
+  border-radius: 4px;
+  color: #fff;
+  background: #147a4f;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fn-protein-toggle {
+  display: block;
+  padding: 0.7rem 0.9rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
+}
+
+.fn-protein-panel-body {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 18px;
+  width: min(360px, calc(100vw - 28px));
+  margin-top: 8px;
+  border: 1px solid #d5ded8;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.fn-protein-panel-head {
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  border-bottom: 1px solid #e7ece9;
+}
+
+.fn-protein-panel-head strong {
+  font-size: 15px;
+}
+
+.fn-protein-panel-head span {
+  color: #59645d;
+  font-size: 12px;
+}
+
+.fn-protein-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.fn-protein-controls button {
+  min-height: 36px;
+  padding: 0.45rem 0.6rem;
+}
+
+.fn-protein-controls button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.fn-protein-threshold,
+.fn-protein-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 10px;
+  color: #28352d;
+  font-weight: 700;
+}
+
+.fn-protein-threshold input {
+  width: 92px;
+  min-height: 34px;
+  border: 1px solid #c6d0ca;
+  border-radius: 4px;
+  padding: 0 8px;
+  font: inherit;
+}
+
+.fn-protein-check {
+  font-weight: 600;
+}
+
+.fn-protein-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.fn-protein-list {
+  max-height: min(620px, calc(100vh - var(--fn-protein-sticky-top, 8px) - 130px));
+  overflow: auto;
+  border-top: 1px solid #e7ece9;
+}
+
+.fn-protein-result {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-bottom: 1px solid #edf1ef;
+  padding: 8px 12px;
+  color: inherit;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fn-protein-result:hover,
+.fn-protein-result:focus-visible {
+  background: #eef8f2;
+}
+
+.fn-protein-rank {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #0f5f3e;
+  background: #eaf8f1;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.fn-protein-result-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fn-protein-result-ratio {
+  color: #0f5f3e;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.fn-protein-empty {
+  padding: 14px 12px;
+  color: #59645d;
+}
+
+.fn-protein-highlight {
+  outline: 3px solid #147a4f;
+  outline-offset: 4px;
+}
+
+.fn-protein-hidden {
+  display: none !important;
+}
