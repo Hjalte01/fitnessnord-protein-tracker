@@ -41,6 +41,16 @@ const cases = [
     name: "Case 12 x A-47 Labs protein bar 35 g",
     url: "https://www.fitnessnord.com/case-12-x-a-47-labs-protein-bar-1-x-35-g-chocolate-banana-18001",
     expectedProtein: [120, 180]
+  },
+  {
+    name: "Fine Gusto Turkey Jerky available BBQ variant",
+    url: "https://www.fitnessnord.com/fine-gusto-turkey-jerky-1-x-25-g",
+    expectedProtein: [9.7, 9.8]
+  },
+  {
+    name: "Liquid egg whites 970 ml",
+    url: "https://www.fitnessnord.com/flydende-aeggehvider-1-liter",
+    expectedProtein: [98, 100]
   }
 ];
 
@@ -68,40 +78,47 @@ function parseNumber(value) {
   return Number(value.replace(",", "."));
 }
 
+function amountToGrams(amount, unit) {
+  const normalizedUnit = unit.toLowerCase();
+  if (normalizedUnit === "kg") return amount * 1000;
+  if (normalizedUnit === "l" || normalizedUnit === "liter") return amount * 1000;
+  return amount;
+}
+
 function parsePackageInfo(text) {
   const normalized = text.replace(/\s+/g, " ");
-  const caseNested = normalized.match(/(?:case|kasse|box)\D{0,40}(\d+)\s*x\D{0,80}\(\s*(?:\d+\s*x\s*)?(\d+(?:[.,]\d+)?)\s*(kg|g)\s*\)/i);
+  const caseNested = normalized.match(/(?:case|kasse|box)\D{0,40}(\d+)\s*x\D{0,80}\(\s*(?:\d+\s*x\s*)?(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|liter)\s*\)/i);
   if (caseNested) {
     const units = parseNumber(caseNested[1]);
     const unitAmount = parseNumber(caseNested[2]);
-    const unitGrams = caseNested[3].toLowerCase() === "kg" ? unitAmount * 1000 : unitAmount;
+    const unitGrams = amountToGrams(unitAmount, caseNested[3]);
     return { totalGrams: units * unitGrams, unitGrams, units };
   }
 
-  const nestedMulti = normalized.match(/(\d+)\s*x\D{0,80}\(\s*(?:\d+\s*x\s*)?(\d+(?:[.,]\d+)?)\s*(kg|g)\s*\)/i);
+  const nestedMulti = normalized.match(/(\d+)\s*x\D{0,80}\(\s*(?:\d+\s*x\s*)?(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|liter)\s*\)/i);
   if (nestedMulti) {
     const units = parseNumber(nestedMulti[1]);
     const unitAmount = parseNumber(nestedMulti[2]);
-    const unitGrams = nestedMulti[3].toLowerCase() === "kg" ? unitAmount * 1000 : unitAmount;
+    const unitGrams = amountToGrams(unitAmount, nestedMulti[3]);
     return { totalGrams: units * unitGrams, unitGrams, units };
   }
 
-  const multi = normalized.match(/(\d+)\s*x\s*(\d+(?:[.,]\d+)?)\s*g/i);
+  const multi = normalized.match(/(\d+)\s*x\s*(\d+(?:[.,]\d+)?)\s*(g|ml)\b/i);
   if (multi) {
     const units = parseNumber(multi[1]);
-    const unitGrams = parseNumber(multi[2]);
+    const unitGrams = amountToGrams(parseNumber(multi[2]), multi[3]);
     return { totalGrams: units * unitGrams, unitGrams, units };
   }
 
-  const parenthesized = [...normalized.matchAll(/\((\d+(?:[.,]\d+)?)\s*(kg|g)\)/gi)];
+  const parenthesized = [...normalized.matchAll(/\((\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|liter)\)/gi)];
   if (parenthesized.length) {
     const best = parenthesized[0];
     const amount = parseNumber(best[1]);
-    const totalGrams = best[2].toLowerCase() === "kg" ? amount * 1000 : amount;
+    const totalGrams = amountToGrams(amount, best[2]);
     return { totalGrams, unitGrams: totalGrams, units: 1 };
   }
 
-  const singleCandidates = [...normalized.matchAll(/(?:^|[^\d])(\d+(?:[.,]\d+)?)\s*(kg|g)\b/gi)]
+  const singleCandidates = [...normalized.matchAll(/(?:^|[^\d])(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|liter)\b/gi)]
     .filter((match) => {
       const after = normalized.slice(match.index + match[0].length, match.index + match[0].length + 24);
       return !/^\s*(?:protein|proteiner|kreatin|creatine)\b/i.test(after);
@@ -111,7 +128,7 @@ function parsePackageInfo(text) {
   if (!single) return null;
 
   const amount = parseNumber(single[1]);
-  const totalGrams = single[2].toLowerCase() === "kg" ? amount * 1000 : amount;
+  const totalGrams = amountToGrams(amount, single[2]);
   return { totalGrams, unitGrams: totalGrams, units: 1 };
 }
 
@@ -136,6 +153,51 @@ function proteinForColumn(valueGrams, columnGrams, packageInfo) {
   if (nearlyEqual(columnGrams, packageInfo.unitGrams)) return valueGrams * packageInfo.units;
   if (nearlyEqual(columnGrams, 100)) return (valueGrams / 100) * packageInfo.totalGrams;
   return valueGrams;
+}
+
+function normalizeVariantName(value) {
+  return value
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(?:flavor|flavour|smag|smagsvariant|choose|option|vælg|venligst|dkk)\b/g, " ")
+    .replace(/\d+(?:[.,]\d+)?/g, " ")
+    .replace(/[^a-zæøå0-9]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function variantMatches(name, hints) {
+  const normalizedName = normalizeVariantName(name);
+  if (!normalizedName) return false;
+
+  return hints
+    .map(normalizeVariantName)
+    .filter(Boolean)
+    .some((hint) => normalizedName.includes(hint) || hint.includes(normalizedName));
+}
+
+function parseVariantProteinFromText(text, packageInfo, variantHints = []) {
+  if (!packageInfo?.totalGrams) return null;
+
+  const normalized = text.replace(/\u00a0/g, " ").replace(/\s+/g, " ");
+  const blocks = [...normalized.matchAll(/\(([^)]*(?:flavor|flavour|smag)[^)]*)\)(.*?)(?=\([^)]*(?:flavor|flavour|smag)[^)]*\)|$)/gi)]
+    .map((match) => {
+      const proteinMatch = match[2].match(/(?:protein|proteiner)\s*(\d+(?:[.,]\d+)?)\s*g/i);
+      if (!proteinMatch) return null;
+
+      return {
+        name: match[1],
+        totalProtein: proteinForColumn(parseNumber(proteinMatch[1]), 100, packageInfo)
+      };
+    })
+    .filter(Boolean);
+
+  if (!blocks.length) return null;
+
+  const hinted = blocks.find((block) => variantMatches(block.name, variantHints));
+  if (hinted) return hinted.totalProtein;
+
+  return Math.max(...blocks.map((block) => block.totalProtein));
 }
 
 function parseProteinGrams(text, packageInfo = null) {
@@ -253,12 +315,26 @@ function parseProteinFromTables(html, packageInfo) {
   return null;
 }
 
+function isPlaceholderOption(text) {
+  return /^(?:-|choose an option|vælg|vaelg|smagsvariant|flavor|smag)$/i.test(text.trim());
+}
+
+function extractVariantHintsFromConfig(text) {
+  return [...text.matchAll(/"label"\s*:\s*"([^"]+)"/gi)]
+    .map((match) => match[1].replace(/\\u00a0/g, " "))
+    .map((label) => label.replace(/\s*-\s*\d+(?:[.,]\d+)?\s*(?:DKK|kr\.?)?.*$/i, "").trim())
+    .filter((label) => label && !isPlaceholderOption(label));
+}
+
 function parseProduct(html) {
   const title = stripTags(extractFirst(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i));
   const scopedText = `${title} ${extractSections(html)}`;
   const explicitText = `${title} ${extractSections(html, false)}`;
   const packageInfo = parsePackageInfo(title) || parsePackageInfo(scopedText) || parsePackageInfo(stripTags(html));
-  const proteinGrams = parseProteinGrams(explicitText, packageInfo) || parseProteinFromTables(html, packageInfo);
+  const variantHints = extractVariantHintsFromConfig(html);
+  const proteinGrams = parseProteinGrams(explicitText, packageInfo)
+    || parseVariantProteinFromText(scopedText, packageInfo, variantHints)
+    || parseProteinFromTables(html, packageInfo);
   const price = Number(extractFirst(html, /"price":\s*"(\d+(?:\.\d+)?)"/i)) || null;
   return { title, packageInfo, proteinGrams, price, ratio: price ? proteinGrams / price : null };
 }

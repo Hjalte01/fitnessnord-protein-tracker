@@ -1,20 +1,23 @@
 const BADGE_CLASS = "fn-protein-ratio";
 const PROCESSED_ATTR = "data-fn-protein-processed";
-const CACHE_PREFIX = "fn-protein:v10:";
+const CACHE_PREFIX = "fn-protein:v11:";
 const PANEL_ID = "fn-protein-panel";
 const HIGHLIGHT_CLASS = "fn-protein-highlight";
 const HIDDEN_CLASS = "fn-protein-hidden";
+const ENABLED_STORAGE_KEY = "enabled";
 const PRODUCT_LINK_SELECTOR = ".item-title a[href], .item-img a[href]";
 const PRODUCT_CARD_SELECTOR = ".product, .item[data-productid], .item";
 const productResults = new Map();
 let panelOpen = false;
-let hideBelowThreshold = false;
+let hideBelowThreshold = true;
 let hideSoldOut = true;
-let sortByRatio = false;
+let sortByRatio = true;
+let listSearch = "";
 let renderQueued = false;
 let nextOriginalIndex = 0;
 let isReordering = false;
 let calculatingAll = false;
+let observer = null;
 
 function parseDkk(text) {
   const match = text.replace(/\s+/g, " ").match(/(\d+(?:[.,]\d{1,2})?)/);
@@ -25,13 +28,20 @@ function parseNumber(value) {
   return Number(value.replace(",", "."));
 }
 
+function amountToGrams(amount, unit) {
+  const normalizedUnit = unit.toLowerCase();
+  if (normalizedUnit === "kg") return amount * 1000;
+  if (normalizedUnit === "l" || normalizedUnit === "liter") return amount * 1000;
+  return amount;
+}
+
 function parsePackageInfo(text) {
   const normalized = text.replace(/\s+/g, " ");
-  const caseNested = normalized.match(/(?:case|kasse|box)\D{0,40}(\d+)\s*x\D{0,80}\(\s*(?:\d+\s*x\s*)?(\d+(?:[.,]\d+)?)\s*(kg|g)\s*\)/i);
+  const caseNested = normalized.match(/(?:case|kasse|box)\D{0,40}(\d+)\s*x\D{0,80}\(\s*(?:\d+\s*x\s*)?(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|liter)\s*\)/i);
   if (caseNested) {
     const units = parseNumber(caseNested[1]);
     const unitAmount = parseNumber(caseNested[2]);
-    const unitGrams = caseNested[3].toLowerCase() === "kg" ? unitAmount * 1000 : unitAmount;
+    const unitGrams = amountToGrams(unitAmount, caseNested[3]);
     return {
       totalGrams: units * unitGrams,
       unitGrams,
@@ -39,11 +49,11 @@ function parsePackageInfo(text) {
     };
   }
 
-  const nestedMulti = normalized.match(/(\d+)\s*x\D{0,80}\(\s*(?:\d+\s*x\s*)?(\d+(?:[.,]\d+)?)\s*(kg|g)\s*\)/i);
+  const nestedMulti = normalized.match(/(\d+)\s*x\D{0,80}\(\s*(?:\d+\s*x\s*)?(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|liter)\s*\)/i);
   if (nestedMulti) {
     const units = parseNumber(nestedMulti[1]);
     const unitAmount = parseNumber(nestedMulti[2]);
-    const unitGrams = nestedMulti[3].toLowerCase() === "kg" ? unitAmount * 1000 : unitAmount;
+    const unitGrams = amountToGrams(unitAmount, nestedMulti[3]);
     return {
       totalGrams: units * unitGrams,
       unitGrams,
@@ -51,10 +61,10 @@ function parsePackageInfo(text) {
     };
   }
 
-  const multi = normalized.match(/(\d+)\s*x\s*(\d+(?:[.,]\d+)?)\s*g/i);
+  const multi = normalized.match(/(\d+)\s*x\s*(\d+(?:[.,]\d+)?)\s*(g|ml)\b/i);
   if (multi) {
     const units = parseNumber(multi[1]);
-    const unitGrams = parseNumber(multi[2]);
+    const unitGrams = amountToGrams(parseNumber(multi[2]), multi[3]);
     return {
       totalGrams: units * unitGrams,
       unitGrams,
@@ -62,11 +72,11 @@ function parsePackageInfo(text) {
     };
   }
 
-  const parenthesized = [...normalized.matchAll(/\((\d+(?:[.,]\d+)?)\s*(kg|g)\)/gi)];
+  const parenthesized = [...normalized.matchAll(/\((\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|liter)\)/gi)];
   if (parenthesized.length) {
     const best = parenthesized[0];
     const amount = parseNumber(best[1]);
-    const totalGrams = best[2].toLowerCase() === "kg" ? amount * 1000 : amount;
+    const totalGrams = amountToGrams(amount, best[2]);
     return {
       totalGrams,
       unitGrams: totalGrams,
@@ -74,7 +84,7 @@ function parsePackageInfo(text) {
     };
   }
 
-  const singleCandidates = [...normalized.matchAll(/(?:^|[^\d])(\d+(?:[.,]\d+)?)\s*(kg|g)\b/gi)]
+  const singleCandidates = [...normalized.matchAll(/(?:^|[^\d])(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|liter)\b/gi)]
     .filter((match) => {
       const after = normalized.slice(match.index + match[0].length, match.index + match[0].length + 24);
       return !/^\s*(?:protein|proteiner|kreatin|creatine)\b/i.test(after);
@@ -84,7 +94,7 @@ function parsePackageInfo(text) {
   if (!single) return null;
 
   const amount = parseNumber(single[1]);
-  const totalGrams = single[2].toLowerCase() === "kg" ? amount * 1000 : amount;
+  const totalGrams = amountToGrams(amount, single[2]);
   return {
     totalGrams,
     unitGrams: totalGrams,
@@ -115,6 +125,51 @@ function proteinForColumn(valueGrams, columnGrams, packageInfo) {
   if (nearlyEqual(columnGrams, 100)) return (valueGrams / 100) * packageInfo.totalGrams;
 
   return valueGrams;
+}
+
+function normalizeVariantName(value) {
+  return value
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(?:flavor|flavour|smag|smagsvariant|choose|option|vælg|venligst|dkk)\b/g, " ")
+    .replace(/\d+(?:[.,]\d+)?/g, " ")
+    .replace(/[^a-zæøå0-9]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function variantMatches(name, hints) {
+  const normalizedName = normalizeVariantName(name);
+  if (!normalizedName) return false;
+
+  return hints
+    .map(normalizeVariantName)
+    .filter(Boolean)
+    .some((hint) => normalizedName.includes(hint) || hint.includes(normalizedName));
+}
+
+function parseVariantProteinFromText(text, packageInfo, variantHints = []) {
+  if (!packageInfo?.totalGrams) return null;
+
+  const normalized = text.replace(/\u00a0/g, " ").replace(/\s+/g, " ");
+  const blocks = [...normalized.matchAll(/\(([^)]*(?:flavor|flavour|smag)[^)]*)\)(.*?)(?=\([^)]*(?:flavor|flavour|smag)[^)]*\)|$)/gi)]
+    .map((match) => {
+      const proteinMatch = match[2].match(/(?:protein|proteiner)\s*(\d+(?:[.,]\d+)?)\s*g/i);
+      if (!proteinMatch) return null;
+
+      return {
+        name: match[1],
+        totalProtein: proteinForColumn(parseNumber(proteinMatch[1]), 100, packageInfo)
+      };
+    })
+    .filter(Boolean);
+
+  if (!blocks.length) return null;
+
+  const hinted = blocks.find((block) => variantMatches(block.name, variantHints));
+  if (hinted) return hinted.totalProtein;
+
+  return Math.max(...blocks.map((block) => block.totalProtein));
 }
 
 function parseProteinFromTables(doc, packageInfo) {
@@ -240,6 +295,42 @@ function findPriceNode(product) {
   return product.querySelector(".item-price .price");
 }
 
+function extractOptionLabel(option) {
+  return option.textContent
+    ?.replace(/\s*-\s*\d+(?:[.,]\d+)?\s*(?:DKK|kr\.?)?.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim() || "";
+}
+
+function isPlaceholderOption(text) {
+  return /^(?:-|choose an option|vælg|vaelg|smagsvariant|flavor|smag)$/i.test(text.trim());
+}
+
+function findVariantHints(product) {
+  const hints = [];
+
+  product.querySelectorAll(".item-properties select, select.product-card-attributes").forEach((select) => {
+    const selected = [...select.selectedOptions]
+      .map(extractOptionLabel)
+      .filter((label) => label && !isPlaceholderOption(label));
+    if (selected.length) {
+      hints.push(...selected);
+      return;
+    }
+
+    hints.push(...[...select.options]
+      .map(extractOptionLabel)
+      .filter((label) => label && !isPlaceholderOption(label)));
+  });
+
+  const scriptText = [...product.querySelectorAll(".eval_script, script")]
+    .map((node) => node.textContent || "")
+    .join(" ");
+  hints.push(...extractVariantHintsFromConfig(scriptText));
+
+  return [...new Set(hints.map(normalizeVariantName).filter(Boolean))];
+}
+
 function isSoldOutProduct(product) {
   const text = product.textContent?.replace(/\s+/g, " ").toLowerCase() || "";
   if (/\b(udsolgt|ikke på lager|ikke paa lager|out of stock|sold out)\b/i.test(text)) return true;
@@ -249,12 +340,23 @@ function isSoldOutProduct(product) {
   ));
 }
 
-function cacheKey(url) {
-  return `${CACHE_PREFIX}${url}`;
+function extractVariantHintsFromConfig(text) {
+  return [...text.matchAll(/"label"\s*:\s*"([^"]+)"/gi)]
+    .map((match) => match[1].replace(/\\u00a0/g, " "))
+    .map((label) => label.replace(/\s*-\s*\d+(?:[.,]\d+)?\s*(?:DKK|kr\.?)?.*$/i, "").trim())
+    .filter((label) => label && !isPlaceholderOption(label));
 }
 
-function readCache(url) {
-  const raw = sessionStorage.getItem(cacheKey(url));
+function variantCachePart(variantHints = []) {
+  return variantHints.length ? `:${variantHints.join("|")}` : "";
+}
+
+function cacheKey(url, variantHints = []) {
+  return `${CACHE_PREFIX}${url}${variantCachePart(variantHints)}`;
+}
+
+function readCache(url, variantHints = []) {
+  const raw = sessionStorage.getItem(cacheKey(url, variantHints));
   if (!raw) return null;
 
   try {
@@ -267,21 +369,21 @@ function readCache(url) {
   return null;
 }
 
-function writeCache(url, proteinGrams) {
-  sessionStorage.setItem(cacheKey(url), JSON.stringify({
+function writeCache(url, proteinGrams, variantHints = []) {
+  sessionStorage.setItem(cacheKey(url, variantHints), JSON.stringify({
     createdAt: Date.now(),
     proteinGrams
   }));
 }
 
-async function fetchProteinGrams(url, fallbackText) {
-  const cached = readCache(url);
+async function fetchProteinGrams(url, fallbackText, variantHints = []) {
+  const cached = readCache(url, variantHints);
   if (cached !== null) return cached;
 
   const fallbackPackageInfo = parsePackageInfo(fallbackText);
   const fallbackProtein = parseProteinGrams(fallbackText, fallbackPackageInfo);
   if (fallbackProtein) {
-    writeCache(url, fallbackProtein);
+    writeCache(url, fallbackProtein, variantHints);
     return fallbackProtein;
   }
 
@@ -304,10 +406,14 @@ async function fetchProteinGrams(url, fallbackText) {
     || parsePackageInfo(fallbackText)
     || parsePackageInfo(scopedText)
     || parsePackageInfo(pageText);
+  const availableVariantHints = variantHints.length
+    ? variantHints
+    : extractVariantHintsFromConfig(pageText);
   const explicitProtein = parseProteinGrams(`${productTitle} ${fallbackText} ${explicitText}`, packageInfo);
-  const proteinGrams = explicitProtein || parseProteinFromTables(doc, packageInfo);
+  const variantProtein = parseVariantProteinFromText(scopedText || pageText, packageInfo, availableVariantHints);
+  const proteinGrams = explicitProtein || variantProtein || parseProteinFromTables(doc, packageInfo);
 
-  if (proteinGrams) writeCache(url, proteinGrams);
+  if (proteinGrams) writeCache(url, proteinGrams, variantHints);
   return proteinGrams;
 }
 
@@ -384,12 +490,14 @@ async function annotateProduct(product) {
 
   const price = parseDkk(priceNode.textContent || "");
   if (!price) return;
+  const variantHints = findVariantHints(product);
+  attachVariantChangeListeners(product);
 
   setProductResult(product, { price, status: "loading" });
   upsertBadge(product, "beregner...", "loading");
 
   try {
-    const proteinGrams = await fetchProteinGrams(link.href, product.textContent || "");
+    const proteinGrams = await fetchProteinGrams(link.href, product.textContent || "", variantHints);
     if (!proteinGrams) {
       setProductResult(product, { price, proteinGrams: null, ratio: null, status: "unknown" });
       upsertBadge(product, "protein ukendt", "unknown");
@@ -406,6 +514,17 @@ async function annotateProduct(product) {
   }
 }
 
+function attachVariantChangeListeners(product) {
+  product.querySelectorAll(".item-properties select, select.product-card-attributes").forEach((select) => {
+    if (select.dataset.fnProteinVariantListener === "true") return;
+    select.dataset.fnProteinVariantListener = "true";
+    select.addEventListener("change", () => {
+      product.removeAttribute(PROCESSED_ATTR);
+      annotateProduct(product);
+    });
+  });
+}
+
 function getProductCards() {
   const cards = new Set();
 
@@ -418,7 +537,9 @@ function getProductCards() {
 }
 
 function scanProducts() {
-  getProductCards().forEach(annotateProduct);
+  const cards = getProductCards();
+  if (cards.length) createPanel();
+  cards.forEach(annotateProduct);
   queueRenderPanel();
 }
 
@@ -603,18 +724,94 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function productUrlSet() {
+  return new Set([...document.querySelectorAll(PRODUCT_LINK_SELECTOR)].map((link) => link.href));
+}
+
+function collectPaginationUrls(root = document) {
+  const urls = new Map();
+  const current = new URL(window.location.href);
+
+  root.querySelectorAll(".pager a[href], .toolbar a[href]").forEach((link) => {
+    const url = new URL(link.href, window.location.href);
+    if (url.origin !== current.origin || url.pathname !== current.pathname) return;
+    if (!url.searchParams.has("p")) return;
+    urls.set(url.href, url.href);
+  });
+
+  urls.delete(current.href);
+  return [...urls.values()];
+}
+
+function findProductGrid(root = document) {
+  return root.querySelector(".products-grid-for-inf-scroll")
+    || root.querySelector(".category-products .products-grid")
+    || root.querySelector(".products-grid");
+}
+
+function extractProductCardsFromDoc(doc) {
+  const grid = findProductGrid(doc);
+  if (!grid) return [];
+
+  return [...grid.children].filter((child) =>
+    child.matches(".product, .item[data-productid]")
+    && findProductLink(child)
+    && findPriceNode(child)
+  );
+}
+
+async function loadAllPagedProducts() {
+  const targetGrid = findProductGrid(document);
+  if (!targetGrid) return false;
+
+  const pending = collectPaginationUrls();
+  if (!pending.length) return false;
+
+  const seenPages = new Set([window.location.href]);
+  const seenProducts = productUrlSet();
+  let appended = 0;
+
+  while (pending.length) {
+    const url = pending.shift();
+    if (seenPages.has(url)) continue;
+    seenPages.add(url);
+
+    const response = await fetch(url, { credentials: "include" });
+    if (!response.ok) continue;
+
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    collectPaginationUrls(doc).forEach((nextUrl) => {
+      if (!seenPages.has(nextUrl) && !pending.includes(nextUrl)) pending.push(nextUrl);
+    });
+
+    for (const card of extractProductCardsFromDoc(doc)) {
+      const link = findProductLink(card);
+      if (!link || seenProducts.has(link.href)) continue;
+
+      seenProducts.add(link.href);
+      targetGrid.append(card);
+      appended += 1;
+    }
+  }
+
+  if (appended) scanProducts();
+  return appended > 0;
+}
+
 async function loadAllVisibleProducts() {
+  if (await loadAllPagedProducts()) return { usedScrollFallback: false };
+
   let stableRounds = 0;
   let rounds = 0;
   let lastCount = getProductCards().length;
   let lastHeight = document.documentElement.scrollHeight;
 
-  while (stableRounds < 3 && rounds < 40) {
+  while (stableRounds < 1 && rounds < 40) {
     rounds += 1;
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
-    await delay(900);
+    await delay(650);
     scanProducts();
-    await delay(300);
 
     const count = getProductCards().length;
     const height = document.documentElement.scrollHeight;
@@ -626,6 +823,8 @@ async function loadAllVisibleProducts() {
       lastHeight = height;
     }
   }
+
+  return { usedScrollFallback: true };
 }
 
 async function calculateAllProducts() {
@@ -640,15 +839,15 @@ async function calculateAllProducts() {
   }
 
   try {
-    await loadAllVisibleProducts();
+    const loadResult = await loadAllVisibleProducts();
     getProductCards().forEach((product) => {
       if (product.getAttribute(PROCESSED_ATTR) !== "true") annotateProduct(product);
     });
     scanProducts();
+    if (loadResult.usedScrollFallback) window.scrollTo({ top: 0, behavior: "auto" });
   } finally {
     calculatingAll = false;
     if (sortByRatio) applySort();
-    window.scrollTo({ top: 0, behavior: "auto" });
 
     if (calculateButton) {
       calculateButton.textContent = originalText;
@@ -666,6 +865,9 @@ function renderPanel() {
   const unknown = [...productResults.values()].filter((result) => result.status === "unknown").length;
   const soldOut = [...productResults.values()].filter((result) => result.soldOut).length;
   const ranked = productsSortedByRatio();
+  const visibleRanked = listSearch
+    ? ranked.filter((result) => result.title.toLowerCase().includes(listSearch))
+    : ranked;
   const best = ranked[0] || null;
 
   panel.querySelector("[data-role='summary']").textContent = best
@@ -678,15 +880,17 @@ function renderPanel() {
   const list = panel.querySelector("[data-role='list']");
   list.textContent = "";
 
-  if (!ranked.length) {
+  if (!visibleRanked.length) {
     const empty = document.createElement("div");
     empty.className = "fn-protein-empty";
-    empty.textContent = "Ingen kendte produkter matcher grænsen.";
+    empty.textContent = listSearch
+      ? "Ingen produkter matcher søgningen."
+      : "Ingen kendte produkter matcher grænsen.";
     list.append(empty);
     return;
   }
 
-  ranked.forEach((result, index) => {
+  visibleRanked.forEach((result) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "fn-protein-result";
@@ -695,7 +899,7 @@ function renderPanel() {
 
     const rank = document.createElement("span");
     rank.className = "fn-protein-rank";
-    rank.textContent = `${index + 1}`;
+    rank.textContent = `${ranked.indexOf(result) + 1}`;
 
     const title = document.createElement("span");
     title.className = "fn-protein-result-title";
@@ -747,7 +951,7 @@ function createPanel() {
         <input id="fn-protein-threshold" type="number" min="0" step="0.1" inputmode="decimal" value="0">
       </label>
       <label class="fn-protein-check">
-        <input type="checkbox" data-role="hide-below">
+        <input type="checkbox" data-role="hide-below" checked>
         Skjul under grænse og ukendt
       </label>
       <label class="fn-protein-check">
@@ -755,8 +959,12 @@ function createPanel() {
         Skjul udsolgt
       </label>
       <label class="fn-protein-check">
-        <input type="checkbox" data-role="sort-by-ratio">
+        <input type="checkbox" data-role="sort-by-ratio" checked>
         Sorter siden efter p/DKK
+      </label>
+      <label class="fn-protein-search">
+        Søg i listen
+        <input type="search" data-role="search" placeholder="fx blueberry">
       </label>
       <div class="fn-protein-list" data-role="list"></div>
     </div>
@@ -775,6 +983,10 @@ function createPanel() {
   });
 
   panel.querySelector("#fn-protein-threshold").addEventListener("input", queueRenderPanel);
+  panel.querySelector("[data-role='search']").addEventListener("input", (event) => {
+    listSearch = event.currentTarget.value.trim().toLowerCase();
+    queueRenderPanel();
+  });
   panel.querySelector("[data-role='hide-below']").addEventListener("change", (event) => {
     hideBelowThreshold = event.currentTarget.checked;
     applyPageFilter();
@@ -804,10 +1016,72 @@ function createPanel() {
   renderPanel();
 }
 
-createPanel();
-scanProducts();
+function removeProteinUi() {
+  restoreOriginalOrder();
+  document.getElementById(PANEL_ID)?.remove();
+  document.querySelectorAll(`.${BADGE_CLASS}`).forEach((badge) => badge.remove());
+  document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach((element) => {
+    element.classList.remove(HIGHLIGHT_CLASS);
+  });
+  document.querySelectorAll(`.${HIDDEN_CLASS}`).forEach((element) => {
+    element.classList.remove(HIDDEN_CLASS);
+  });
+  document.querySelectorAll(`[${PROCESSED_ATTR}]`).forEach((element) => {
+    element.removeAttribute(PROCESSED_ATTR);
+  });
+}
 
-const observer = new MutationObserver(() => {
-  if (!isReordering) scanProducts();
-});
-observer.observe(document.querySelector("main#content") || document.body, { childList: true, subtree: true });
+function resetState() {
+  panelOpen = false;
+  hideBelowThreshold = true;
+  hideSoldOut = true;
+  sortByRatio = true;
+  listSearch = "";
+  renderQueued = false;
+  nextOriginalIndex = 0;
+  isReordering = false;
+  calculatingAll = false;
+  productResults.clear();
+}
+
+function startExtension() {
+  if (observer) return;
+
+  scanProducts();
+  observer = new MutationObserver(() => {
+    if (!isReordering) scanProducts();
+  });
+  observer.observe(document.querySelector("main#content") || document.body, { childList: true, subtree: true });
+}
+
+function stopExtension() {
+  observer?.disconnect();
+  observer = null;
+  removeProteinUi();
+  resetState();
+}
+
+async function readEnabledSetting() {
+  try {
+    const stored = await browser.storage.local.get(ENABLED_STORAGE_KEY);
+    return stored[ENABLED_STORAGE_KEY] !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
+async function initExtension() {
+  if (await readEnabledSetting()) startExtension();
+
+  browser.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes[ENABLED_STORAGE_KEY]) return;
+
+    if (changes[ENABLED_STORAGE_KEY].newValue === false) {
+      stopExtension();
+    } else {
+      startExtension();
+    }
+  });
+}
+
+initExtension();

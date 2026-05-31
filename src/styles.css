@@ -105,7 +105,8 @@
 }
 
 .fn-protein-threshold,
-.fn-protein-check {
+.fn-protein-check,
+.fn-protein-search {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -116,6 +117,21 @@
 
 .fn-protein-threshold input {
   width: 92px;
+  min-height: 34px;
+  border: 1px solid #c6d0ca;
+  border-radius: 4px;
+  padding: 0 8px;
+  font: inherit;
+}
+
+.fn-protein-search {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.fn-protein-search input {
+  width: 100%;
   min-height: 34px;
   border: 1px solid #c6d0ca;
   border-radius: 4px;
