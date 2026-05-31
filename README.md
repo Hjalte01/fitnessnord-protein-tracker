@@ -63,6 +63,24 @@ Then:
 
 Temporary add-ons are removed when Firefox restarts.
 
+## Permanent Install
+
+Normal Firefox requires extensions to be signed before they can be installed permanently. Temporary loading through `about:debugging` is only for development.
+
+For personal use, sign it as an unlisted extension through Mozilla Add-ons:
+
+1. Create or open a Mozilla Add-ons developer account.
+2. Create API credentials at `https://addons.mozilla.org/developers/addon/api/key/`.
+3. Run:
+
+```sh
+web-ext sign --source-dir=. --channel=unlisted --api-key="$AMO_API_KEY" --api-secret="$AMO_API_SECRET"
+```
+
+The signed `.xpi` will be written to `web-ext-artifacts/`. Open that file in Firefox to install it permanently.
+
+Unsigned permanent installs are only practical in Firefox Developer Edition/Nightly with signature checks disabled, which is not recommended for normal browsing.
+
 ## Development
 
 Enter the Nix dev shell:
